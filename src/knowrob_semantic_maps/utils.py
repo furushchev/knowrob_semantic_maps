@@ -2,8 +2,11 @@
 # -*- coding: utf-8 -*-
 # Author: Yuki Furuta <furushchev@jsk.imi.i.u-tokyo.ac.jp>
 
+import os
 import random
 import string
+import subprocess
+import sys
 
 
 class UniqueStringGenerator(object):

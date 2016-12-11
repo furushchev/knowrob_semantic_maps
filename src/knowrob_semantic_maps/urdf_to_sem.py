@@ -8,6 +8,7 @@ from urdf_parser_py.urdf import URDF
 import tf.transformations as T
 
 from utils import UniqueStringGenerator
+from gazebo import resolve_model_path
 
 
 class URDF2SEM(object):
@@ -109,9 +110,11 @@ class URDF2SEM(object):
         map_name = self.map_name
         prefix = self.map_name + "_"
         link = self.urdf.link_map[link_name]
+
         mesh_file_name = None
         if link.visual is not None:
-            mesh_file_name = link.visual.geometry.filename
+            mesh_file_name = resolve_model_path(link.visual.geometry.filename)
+
         s.write("""
     <owl:NamedIndividual rdf:about="&{map_ns};{prefix}{link_name}">
         <rdf:type rdf:resource="&srdl2-comp;UrdfLink"/>
