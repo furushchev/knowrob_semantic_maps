@@ -76,7 +76,6 @@ class GazeboModelResolver(object):
             path = os.path.join(self.cached_path[key], path)
         else:
             raise Exception("path %s is not found" % path)
-        print path
         return self.pack_ros_path(path)
 
 _gazebo = GazeboModelResolver()

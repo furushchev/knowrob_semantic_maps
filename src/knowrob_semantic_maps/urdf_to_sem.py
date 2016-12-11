@@ -6,6 +6,7 @@ import os
 from StringIO import StringIO
 from urdf_parser_py.urdf import URDF
 import tf.transformations as T
+import numpy as np
 
 from utils import UniqueStringGenerator
 from gazebo import resolve_model_path
@@ -112,8 +113,10 @@ class URDF2SEM(object):
         link = self.urdf.link_map[link_name]
 
         mesh_file_name = None
+        mesh_scale = None
         if link.visual is not None:
             mesh_file_name = resolve_model_path(link.visual.geometry.filename)
+            mesh_scale = "%f %f %f" % tuple(link.visual.geometry.scale)
 
         s.write("""
     <owl:NamedIndividual rdf:about="&{map_ns};{prefix}{link_name}">
@@ -130,10 +133,13 @@ class URDF2SEM(object):
         else:
             s.write("""
         <knowrob:pathToCadModel rdf:datatype="&xsd;string">{mesh_file_name}</knowrob:pathToCadModel>""".format(**locals()))
+        if mesh_scale is not None:
+            s.write("""
+        <srdl2-comp:mesh_scale rdf:datatype="&xsd;string">{mesh_scale}</srdl2-comp:mesh_scale>""".format(**locals()))
         s.write("""
     </owl:NamedIndividual>\n""")
 
-    def write_transformation(self, s, link_name):
+    def write_transformation(self, s, link_name, absolute=True):
         prefix = self.map_name + "_"
         try:
             parent_joint_name = self.urdf.parent_map[link_name][0]
@@ -145,7 +151,7 @@ class URDF2SEM(object):
 
         # write perception
         s.write("""
-    <owl:NamedIndividual rdf:about="&knowrob;{perception_name}">
+    <owl:NamedIndividual rdf:about="&{map_ns};{perception_name}">
         <rdf:type rdf:resource="&knowrob;SemanticMapPerception"/>
         <knowrob:eventOccursAt rdf:resource="&{map_ns};{transformation_name}"/>
         <knowrob:startTime rdf:resource="&{map_ns};timepoint_0000000001"/>
@@ -156,19 +162,43 @@ class URDF2SEM(object):
         s.write("""
     <owl:NamedIndividual rdf:about="&{map_ns};{transformation_name}">
         <rdf:type rdf:resource="&knowrob;Transformation"/>""".format(**locals()))
-        if joint.parent in self.transformations:
-            parent_transformation_name = self.transformations[joint.parent]
-            s.write("""
-        <knowrob:relativeTo rdf:resource="&{map_ns};{parent_transformation_name}"/>""".format(**locals()))
         translation = "0.0 0.0 0.0"
         quaternion = "0.0 0.0 0.0 1.0"
-        if joint.origin is not None:
-            translation = "%f %f %f" % tuple(joint.origin.xyz)
-            quaternion = "%f %f %f %f" % tuple(T.quaternion_from_euler(*joint.origin.rpy))
+        if absolute:
+            t, q = self.calc_transformation_from_root_link(link_name)
+            translation = "%f %f %f" % t
+            quaternion = "%f %f %f %f" % q
+        else:
+            # relative to parent transformation
+            if joint.parent in self.transformations:
+                parent_transformation_name = self.transformations[joint.parent]
+                s.write("""
+        <knowrob:relativeTo rdf:resource="&{map_ns};{parent_transformation_name}"/>""".format(**locals()))
+            if joint.origin is not None:
+                translation = "%f %f %f" % tuple(joint.origin.xyz)
+                q = T.quaternion_from_euler(*joint.origin.rpy)
+                quaternion = "%f %f %f %f" % (q[3], q[0], q[1], q[2])
         s.write("""
         <knowrob:translation rdf:datatype="&xsd;string">{translation}</knowrob:translation>
         <knowrob:quaternion rdf:datatype="&xsd;string">{quaternion}</knowrob:quaternion>
     </owl:NamedIndividual>\n""".format(**locals()))
+        self.transformations[link_name] = transformation_name
+
+    def calc_transformation_from_root_link(self, link_name):
+        joint_names = self.urdf.get_chain(self.urdf.get_root(), link_name,
+                                          joints=True, links=False)
+        joints = [self.urdf.joint_map[j] for j in joint_names]
+        m = np.dot(T.translation_matrix((0,0,0)),
+                   T.euler_matrix(0,0,0))
+        for j in joints:
+            if j.origin is None:
+                continue
+            n = np.dot(T.translation_matrix(tuple(j.origin.xyz)),
+                       T.euler_matrix(*tuple(j.origin.rpy)))
+            m = np.dot(m, n)
+        t = T.translation_from_matrix(m)
+        q = T.quaternion_from_matrix(m)
+        return tuple(t), (q[3], q[0], q[1], q[2])
 
     def write_link_recursive(self, s, link_name):
         self.write_link(s, link_name)

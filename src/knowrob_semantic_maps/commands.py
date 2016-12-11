@@ -9,6 +9,8 @@ from urdf_to_sem import URDF2SEM
 
 class FileNotFoundException(Exception):
     pass
+class FileAlreadyExistsException(Exception):
+    pass
 
 def urdf_to_sem(urdf_path, sem_path=None, overwrite=False):
     if not os.path.exists(urdf_path):
@@ -17,8 +19,13 @@ def urdf_to_sem(urdf_path, sem_path=None, overwrite=False):
         base_name, _ = os.path.splitext(urdf_path)
         sem_path = base_name + ".owl"
 
+    if os.path.exists(sem_path) and overwrite is False:
+        raise FileAlreadyExistsException(sem_path)
+
     u2s = URDF2SEM(urdf_path, sem_path)
-    print u2s.to_string()
+    with open(sem_path, "w") as f:
+        f.write(u2s.to_string())
+    print "saved to", sem_path
 
     return True
 
