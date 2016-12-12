@@ -10,7 +10,10 @@ import knowrob_semantic_maps
 
 
 def execute(args):
-    return knowrob_semantic_maps.urdf_to_sem(args.urdf, args.sem, args.overwrite)
+    if knowrob_semantic_maps.urdf_to_sem(args.urdf, args.sem, args.overwrite):
+        return 0
+    else:
+        return 1
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

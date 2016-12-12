@@ -23,6 +23,8 @@ def urdf_to_sem(urdf_path, sem_path=None, overwrite=False):
         raise FileAlreadyExistsException(sem_path)
 
     u2s = URDF2SEM(urdf_path, sem_path)
+    if not os.path.exists(os.path.dirname(sem_path)):
+        os.makedirs(os.path.dirname(sem_path))
     with open(sem_path, "w") as f:
         f.write(u2s.to_string())
     print "saved to", sem_path
