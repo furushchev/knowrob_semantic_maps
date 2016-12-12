@@ -83,9 +83,8 @@ class URDF2SEM(object):
         s.write("""
     <!-- =========================================== -->
     <!-- |   Ontology Imports                      | -->
-    <!-- =========================================== -->
-
-""")
+    <!-- =========================================== -->""")
+        s.write("\n\n")
         s.write("""    <owl:Ontology rdf:about="{map_uri_base}">\n""".format(map_uri_base=self.map_uri_base))
         for imp in self.imports:
             s.write("""      <owl:imports rdf:resource="{imp}"/>\n""".format(imp=imp))
@@ -139,55 +138,32 @@ class URDF2SEM(object):
         s.write("""
     </owl:NamedIndividual>\n""")
 
-    def write_transformation(self, s, link_name, absolute=True):
-        prefix = self.map_name + "_"
-        try:
-            parent_joint_name = self.urdf.parent_map[link_name][0]
-            joint = self.urdf.joint_map[parent_joint_name]
-        except: return
-        map_ns = self.map_ns
-        perception_name = "SemanticMapPerception_" + self.id_gen.gen()
-        transformation_name = "Transformation_" + self.id_gen.gen()
-
-        # write perception
-        s.write("""
-    <owl:NamedIndividual rdf:about="&{map_ns};{perception_name}">
-        <rdf:type rdf:resource="&knowrob;SemanticMapPerception"/>
-        <knowrob:eventOccursAt rdf:resource="&{map_ns};{transformation_name}"/>
-        <knowrob:startTime rdf:resource="&{map_ns};timepoint_0000000001"/>
-        <knowrob:objectActedOn rdf:resource="&{map_ns};{prefix}{link_name}"/>
-    </owl:NamedIndividual>""".format(**locals()))
-
-        # write transformation
-        s.write("""
-    <owl:NamedIndividual rdf:about="&{map_ns};{transformation_name}">
-        <rdf:type rdf:resource="&knowrob;Transformation"/>""".format(**locals()))
-        translation = "0.0 0.0 0.0"
-        quaternion = "0.0 0.0 0.0 1.0"
-        if absolute:
-            t, q = self.calc_transformation_from_root_link(link_name)
-            translation = "%f %f %f" % t
-            quaternion = "%f %f %f %f" % q
+    def calc_transformation(self, name, relative_to=None):
+        calc_from_joint = False
+        if relative_to:
+            if relative_to in self.urdf.link_map:
+                parent_link_name = relative_to
+            elif relative_to in self.urdf.joint_map:
+                parent_link_name = self.urdf.joint_map[name].parent
+                calc_from_joint = True
         else:
-            # relative to parent transformation
-            if joint.parent in self.transformations:
-                parent_transformation_name = self.transformations[joint.parent]
-                s.write("""
-        <knowrob:relativeTo rdf:resource="&{map_ns};{parent_transformation_name}"/>""".format(**locals()))
-            if joint.origin is not None:
-                t, q = self.calc_transformation_from_root_link(link_name)
-                translation = "%f %f %f" % t
-                quaternion = "%f %f %f %f" % q
-        s.write("""
-        <knowrob:translation rdf:datatype="&xsd;string">{translation}</knowrob:translation>
-        <knowrob:quaternion rdf:datatype="&xsd;string">{quaternion}</knowrob:quaternion>
-    </owl:NamedIndividual>\n""".format(**locals()))
-        self.transformations[link_name] = transformation_name
+            parent_link_name = self.urdf.get_root()
 
-    def calc_transformation_from_root_link(self, link_name):
-        poses = []
-        chains = self.urdf.get_chain(self.urdf.get_root(), link_name,
+        calc_to_joint = False
+        if name in self.urdf.link_map:
+            child_link_name = name
+        elif name in self.urdf.joint_map:
+            child_link_name = self.urdf.joint_map[name].child
+            calc_to_joint = True
+
+        chains = self.urdf.get_chain(parent_link_name, child_link_name,
                                      joints=True, links=True)
+        if calc_from_joint:
+            chains = chains[1:]
+        if calc_to_joint:
+            chains = chains[:-1]
+
+        poses = []
         for name in chains:
             if name in self.urdf.joint_map:
                 joint = self.urdf.joint_map[name]
@@ -207,22 +183,120 @@ class URDF2SEM(object):
         q = T.quaternion_from_matrix(m)
         return tuple(t), (q[3], q[0], q[1], q[2])
 
-    def write_link_recursive(self, s, link_name):
+    def write_transformation(self, s, name, relative_to=None):
+        if name in self.urdf.link_map and name not in self.urdf.parent_map:
+            # no need to define transform if link has no parent link
+            return
+
+        prefix = self.map_name + "_"
+        map_ns = self.map_ns
+        perception_name = "SemanticMapPerception_" + self.id_gen.gen()
+        transformation_name = "Transformation_" + self.id_gen.gen()
+
+        t, q = self.calc_transformation(name, relative_to)
+        translation = "%f %f %f" % t
+        quaternion = "%f %f %f %f" % q
+
+        # write perception
+        s.write("""
+    <owl:NamedIndividual rdf:about="&{map_ns};{perception_name}">
+        <rdf:type rdf:resource="&knowrob;SemanticMapPerception"/>
+        <knowrob:eventOccursAt rdf:resource="&{map_ns};{transformation_name}"/>
+        <knowrob:startTime rdf:resource="&{map_ns};timepoint_0000000001"/>
+        <knowrob:objectActedOn rdf:resource="&{map_ns};{prefix}{name}"/>
+    </owl:NamedIndividual>""".format(**locals()))
+
+        # write transformation
+        s.write("""
+    <owl:NamedIndividual rdf:about="&{map_ns};{transformation_name}">
+        <rdf:type rdf:resource="&knowrob;Transformation"/>""".format(**locals()))
+        if relative_to is not None and relative_to in self.transformations:
+            parent_transformation_name = self.transformations[relative_to]
+            s.write("""
+        <knowrob:relativeTo rdf:resource="&{map_ns};{parent_transformation_name}"/>""".format(**locals()))
+        s.write("""
+        <knowrob:translation rdf:datatype="&xsd;string">{translation}</knowrob:translation>
+        <knowrob:quaternion rdf:datatype="&xsd;string">{quaternion}</knowrob:quaternion>
+    </owl:NamedIndividual>\n""".format(**locals()))
+        self.transformations[name] = transformation_name
+
+    def write_transformation_for_link(self, s, link_name, absolute=True):
+        try:
+            parent_joint_name = self.urdf.parent_map[link_name][0]
+            joint = self.urdf.joint_map[parent_joint_name]
+            parent_link_name = joint.parent
+        except: return
+
+        if absolute:
+            self.write_transformation(s, link_name)
+        else:
+            self.write_transformation(s, link_name, relative_to=parent_link_name)
+
+    def write_link_recursive(self, s, link_name, absolute=True):
         self.write_link(s, link_name)
-        self.write_transformation(s, link_name)
+        self.write_transformation_for_link(s, link_name, absolute)
         if link_name in self.urdf.child_map:
             for j, child_link in self.urdf.child_map[link_name]:
-                self.write_link_recursive(s, child_link)
+                self.write_link_recursive(s, child_link, absolute)
 
-    def write_links(self, s):
+    def write_links(self, s, absolute=True):
         s.write("""
+
     <!-- =========================================== -->
     <!-- |   Robot Links                           | -->
     <!-- =========================================== -->""")
         s.write("\n\n")
 
         # link definition
-        self.write_link_recursive(s, self.urdf.get_root())
+        self.write_link_recursive(s, self.urdf.get_root(), absolute)
 
-    def write_joints(s, joint_name):
-        pass
+    def write_joint(self, s, joint_name):
+        map_ns = self.map_ns
+        map_name = self.map_name
+        prefix = self.map_name + "_"
+        joint = self.urdf.joint_map[joint_name]
+        joint_type = "%sUrdfJoint" % joint.type.title()
+        child_link_name = joint.child
+
+        s.write("""
+    <owl:NamedIndividual rdf:about="&{map_ns};{prefix}{joint_name}">
+        <rdf:type rdf:resource="&srdl2-comp;{joint_type}"/>
+        <srdl2-comp:urdfName>{joint_name}</srdl2-comp:urdfName>
+        <knowrob:describedInMap rdf:resource="&{map_ns};{map_name}"/>
+        <srdl2-comp:succeedingLink rdf:resource="&{map_ns};{prefix}{child_link_name}"/>
+    </owl:NamedIndividual>""".format(**locals()))
+
+    def write_transformation_for_joint(self, s, joint_name, absolute=True):
+        if absolute:
+            self.write_transformation(s, joint_name)
+        else:
+            parent_link_name = self.urdf.joint_map[joint_name].parent
+            self.write_transformation(s, joint_name, relative_to=parent_link_name)
+
+    def write_joint_recursive(self, s, parent_link_name, absolute=True):
+        joints = []
+        child_links = []
+        if parent_link_name not in self.urdf.child_map:
+            return
+        for j, l in self.urdf.child_map[parent_link_name]:
+            joints.append(j)
+            child_links.append(l)
+        for joint_name in joints:
+            self.write_joint(s, joint_name)
+            self.write_transformation_for_joint(s, joint_name, absolute)
+        for child_link_name in child_links:
+            self.write_joint_recursive(child_link_name, absolute)
+
+    def write_joints(self, s, absolute=True):
+        if len(self.urdf.joints) == 0:
+            return
+
+        s.write("""
+
+    <!-- =========================================== -->
+    <!-- |   Robot Joints                          | -->
+    <!-- =========================================== -->""")
+        s.write("\n\n")
+
+        # joint definition
+        self.write_joint_recursive(s, self.urdf.get_root(), absolute)
