@@ -175,9 +175,9 @@ class URDF2SEM(object):
                 s.write("""
         <knowrob:relativeTo rdf:resource="&{map_ns};{parent_transformation_name}"/>""".format(**locals()))
             if joint.origin is not None:
-                translation = "%f %f %f" % tuple(joint.origin.xyz)
-                q = T.quaternion_from_euler(*joint.origin.rpy)
-                quaternion = "%f %f %f %f" % (q[3], q[0], q[1], q[2])
+                t, q = self.calc_transformation_from_root_link(link_name)
+                translation = "%f %f %f" % t
+                quaternion = "%f %f %f %f" % q
         s.write("""
         <knowrob:translation rdf:datatype="&xsd;string">{translation}</knowrob:translation>
         <knowrob:quaternion rdf:datatype="&xsd;string">{quaternion}</knowrob:quaternion>
@@ -185,16 +185,23 @@ class URDF2SEM(object):
         self.transformations[link_name] = transformation_name
 
     def calc_transformation_from_root_link(self, link_name):
-        joint_names = self.urdf.get_chain(self.urdf.get_root(), link_name,
-                                          joints=True, links=False)
-        joints = [self.urdf.joint_map[j] for j in joint_names]
+        poses = []
+        chains = self.urdf.get_chain(self.urdf.get_root(), link_name,
+                                     joints=True, links=True)
+        for name in chains:
+            if name in self.urdf.joint_map:
+                joint = self.urdf.joint_map[name]
+                if joint.origin is not None:
+                    poses.append(joint.origin)
+            elif name in self.urdf.link_map:
+                link = self.urdf.link_map[name]
+                if link.visual is not None and link.visual.origin is not None:
+                    poses.append(link.visual.origin)
         m = np.dot(T.translation_matrix((0,0,0)),
                    T.euler_matrix(0,0,0))
-        for j in joints:
-            if j.origin is None:
-                continue
-            n = np.dot(T.translation_matrix(tuple(j.origin.xyz)),
-                       T.euler_matrix(*tuple(j.origin.rpy)))
+        for p in poses:
+            n = np.dot(T.translation_matrix(tuple(p.xyz)),
+                       T.euler_matrix(*tuple(p.rpy)))
             m = np.dot(m, n)
         t = T.translation_from_matrix(m)
         q = T.quaternion_from_matrix(m)
